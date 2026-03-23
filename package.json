@@ -1,0 +1,14 @@
+{
+  "name": "whisp-dispatcher",
+  "version": "1.0.0",
+  "description": "Stealth P2P Dispatcher for WHISP Cluster",
+  "main": "dispatcher.js",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.18.2",
+    "ws": "^8.13.0"
+  },
+  "scripts": {
+    "start": "node dispatcher.js"
+  }
+}
