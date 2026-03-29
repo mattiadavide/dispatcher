@@ -2,69 +2,43 @@ const express = require('express');
 const { WebSocketServer } = require('ws');
 const http = require('http');
 const cors = require('cors');
-
+const crypto = require('crypto');
 const app = express();
 app.use(cors());
 app.use(express.json());
-
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
-
-const availableNodes = new Set();
-const pendingTasks = new Map();
-
+const nodes = new Map();
 wss.on('connection', (ws) => {
-    console.log('[+] NODE_ACTIVE');
-    availableNodes.add(ws);
-
+    const id = crypto.randomUUID();
+    nodes.set(id, ws);
+    console.log(`[+] NODE_SIGNALING_ACTIVE: ${id}`);
+    ws.send(JSON.stringify({ type: 'SIGNALING_READY', id }));
     ws.on('message', (message) => {
-        const data = JSON.parse(message);
-        
-        if (data.type === 'COMPUTE_RESULT' && pendingTasks.has(data.taskId)) {
-            const res = pendingTasks.get(data.taskId);
-            
-            res.json({
-                id: data.taskId,
-                object: "chat.completion",
-                choices: [{
-                    message: { role: "assistant", content: data.result }
-                }]
-            });
-            
-            pendingTasks.delete(data.taskId);
-            availableNodes.add(ws); 
+        try {
+            const data = JSON.parse(message);
+            if (data.type === 'LIST_NODES') {
+                const list = Array.from(nodes.keys()).filter(nodeId => nodeId !== id);
+                ws.send(JSON.stringify({ type: 'NODE_LIST', nodes: list }));
+            } else if (['OFFER', 'ANSWER', 'ICE_CANDIDATE'].includes(data.type)) {
+                const target = nodes.get(data.target);
+                if (target) {
+                    target.send(JSON.stringify({
+                        type: data.type,
+                        sender: id,
+                        payload: data.payload
+                    }));
+                }
+            }
+        } catch (e) {
+            console.error('[!] SIGNAL_ERROR:', e.message);
         }
     });
-
     ws.on('close', () => {
-        console.log('[-] NODE_DEACTIVATED');
-        availableNodes.delete(ws);
+        console.log(`[-] NODE_SIGNALING_DEACTIVATED: ${id}`);
+        nodes.delete(id);
     });
 });
-
-app.post('/v1/chat/completions', (req, res) => {
-    if (availableNodes.size === 0) {
-        return res.status(503).json({ error: "ERR_NO_ACTIVE_NODES" });
-    }
-
-    const taskId = 'TASK_' + Date.now();
-    const prompt = req.body.messages; 
-    
-    const node = Array.from(availableNodes)[0];
-    availableNodes.delete(node); 
-
-    pendingTasks.set(taskId, res);
-
-    node.send(JSON.stringify({
-        type: 'EXECUTE_COMPUTE',
-        taskId: taskId,
-        payload: prompt
-    }));
-    
-    console.log(`[>] TASK_${taskId}_DISPATCHED`);
-});
-
 const PORT = process.env.PORT || 8080;
-server.listen(PORT, () => {
-    console.log(`[ DISPATCHER_ACTIVE ] PORT:${PORT}`);
-});
+server.listen(PORT, () => console.log(`[ SIGNALING_SERVER_ACTIVE ] PORT:${PORT}`));
+
